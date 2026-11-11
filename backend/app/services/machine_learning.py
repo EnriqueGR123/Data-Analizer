@@ -125,7 +125,9 @@ def entrenar_modelo(df, dataset_id):
         "mae": round(float(mae), 4),
         "rmse": round(float(rmse), 4),
         "r2": round(float(r2), 4),
-        "modelo_guardado": str(ruta_modelo)
+        "modelo_guardado": str(ruta_modelo),
+        "Dataset": df.head(5).to_dict()
+
     }
 
 

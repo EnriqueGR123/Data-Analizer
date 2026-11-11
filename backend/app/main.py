@@ -178,7 +178,8 @@ def train_dataset(id: int, db: Session = Depends(get_db)):
             "registros_utilizados": len(X),
             "mae": round(float(mae), 4),
             "rmse": round(float(rmse), 4),
-            "r2": round(float(r2), 4)
+            "r2": round(float(r2), 4),
+        
         }
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
@@ -193,6 +194,7 @@ def train_dataset(id: int, db: Session = Depends(get_db)):
 # para estimar la irradiación solar diaria y devuelve el resultado en kWh/m2/dia
 @app.post("/datasets/{id}/predict")
 def predict_dataset(id: int, datos: PredictionRequest, db: Session = Depends(get_db)):
+    dataset, df = obtener_dataset_y_archivo(id, db)
     dataset = db.query(Dataset).filter(Dataset.id == id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
@@ -211,5 +213,6 @@ def predict_dataset(id: int, datos: PredictionRequest, db: Session = Depends(get
         "dataset": dataset.filename,
         "fecha": datos.fecha.isoformat(),
         "irradiacion_predicha": round(float(resultado), 4),
-        "unidad": "kWh/m2/dia"
+        "unidad": "kWh/m2/dia",
+        "rows": df.shape[0],
     }
