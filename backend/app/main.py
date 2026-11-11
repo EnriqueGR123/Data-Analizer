@@ -1,19 +1,12 @@
-
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from sqlalchemy.orm import Session
 from io import BytesIO
 from pathlib import Path
 import uuid
 import pandas as pd
-import numpy as np
 from app.db.dependencies import get_db
-from app.schemas import DatasetResponse, PredictionRequest
+from app.schemas import DatasetResponse
 from app.models.Dataset import Dataset
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import joblib
-from app.services.machine_learning import preparar_datos
-
 app = FastAPI(title="Aura Jalisco")
 
 
@@ -145,74 +138,3 @@ def get_analysis(id: int, db: Session = Depends(get_db)):
     }
 
 
-# Entrenar el árbol de decisión con un dataset
-# Entrenamos el modelo:
-# Esta función utiliza los datos preparados para entrenar un árbol de decisión.
-# Primero divide los datos en 80% para entrenamiento y 20% para pruebas.
-# Después entrena el modelo y evalúa sus resultados mediante las métricas
-# MAE, RMSE y R2. Finalmente, vuelve a entrenarlo con todos los registros
-# y guarda el modelo para utilizarlo posteriormente en las predicciones.
-@app.post("/datasets/{id}/train")
-def train_dataset(id: int, db: Session = Depends(get_db)):
-    dataset, df = obtener_dataset_y_archivo(id, db)
-    try:
-        X, y = preparar_datos(df)
-        if len(X) < 30:
-            raise ValueError("Se necesitan al menos 30 registros válidos")
-        # Dividimos los datos: 80% entrenamiento y 20% prueba
-        punto = int(len(X) * 0.80)
-        X_train, X_test = X.iloc[:punto], X.iloc[punto:]
-        y_train, y_test = y.iloc[:punto], y.iloc[punto:]
-        modelo = DecisionTreeRegressor(max_depth=5, min_samples_leaf=20, random_state=42)
-        modelo.fit(X_train, y_train)
-        # Evaluamos el modelo
-        predicciones = modelo.predict(X_test)
-        mae = mean_absolute_error(y_test, predicciones)
-        rmse = np.sqrt(mean_squared_error(y_test, predicciones))
-        r2 = r2_score(y_test, predicciones)
-        # Entrenamos con todos los datos y guardamos el modelo
-        modelo.fit(X, y)
-        ruta_modelo = MODEL_DIR / f"modelo_solar_{id}.pkl"
-        joblib.dump(modelo, ruta_modelo)
-        resultado = {
-            "registros_utilizados": len(X),
-            "mae": round(float(mae), 4),
-            "rmse": round(float(rmse), 4),
-            "r2": round(float(r2), 4),
-        
-        }
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error))
-    return {"mensaje": "Modelo entrenado correctamente", "resultado": resultado}
-
-
-# Realizar una predicción de irradiación solar
-# Realizamos una predicción de irradiación solar:
-# Esta función recibe una fecha y busca el modelo que fue entrenado anteriormente
-# Comprueba que el modelo exista, lo carga y calcula las variables de seno y coseno
-# correspondientes a la fecha solicitada. Después introduce esos valores al modelo
-# para estimar la irradiación solar diaria y devuelve el resultado en kWh/m2/dia
-@app.post("/datasets/{id}/predict")
-def predict_dataset(id: int, datos: PredictionRequest, db: Session = Depends(get_db)):
-    dataset, df = obtener_dataset_y_archivo(id, db)
-    dataset = db.query(Dataset).filter(Dataset.id == id).first()
-    if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    ruta_modelo = MODEL_DIR / f"modelo_solar_{id}.pkl"
-    if not ruta_modelo.exists():
-        raise HTTPException(status_code=404, detail="Primero debes entrenar el modelo")
-    try:
-        modelo = joblib.load(ruta_modelo)
-        fecha = pd.to_datetime(datos.fecha)
-        dia = fecha.dayofyear
-        entrada = pd.DataFrame([{"dia_sin": np.sin(2 * np.pi * dia / 365.25),"dia_cos": np.cos(2 * np.pi * dia / 365.25)}])
-        resultado = modelo.predict(entrada)[0]
-    except (ValueError, OSError) as error:
-        raise HTTPException(status_code=400, detail=str(error))
-    return {
-        "dataset": dataset.filename,
-        "fecha": datos.fecha.isoformat(),
-        "irradiacion_predicha": round(float(resultado), 4),
-        "unidad": "kWh/m2/dia",
-        "rows": df.shape[0],
-    }
